@@ -1,12 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/ioutil"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"regexp"
@@ -16,8 +19,10 @@ import (
 	"time"
 
 	log "github.com/Sirupsen/logrus"
+	restful "github.com/emicklei/go-restful"
 	"github.com/gaia-adm/pumba/action"
 	"github.com/gaia-adm/pumba/container"
+	"github.com/rs/cors"
 
 	"github.com/urfave/cli"
 
@@ -92,6 +97,8 @@ const (
 	Re2Prefix = "re2:"
 	// DefaultInterface default network interface
 	DefaultInterface = "eth0"
+
+	DefaultImage = "gaiadocker/iproute2"
 )
 
 func contains(slice []string, item string) bool {
@@ -114,6 +121,8 @@ func main() {
 	if os.Getenv("DOCKER_CERT_PATH") != "" {
 		rootCertPath = os.Getenv("DOCKER_CERT_PATH")
 	}
+
+	//setUpRoutes()
 
 	app := cli.NewApp()
 	app.Name = "Pumba"
@@ -430,9 +439,33 @@ func main() {
 		},
 	}
 
-	if err := app.Run(os.Args); err != nil {
-		log.Fatal(err)
+	client = container.NewClient("unix:///var/run/docker.sock", nil)
+
+	// get Docker image with tc (iproute2 package)
+	client.PullImage(DefaultImage)
+	/*delayCmd := action.CommandNetemDelay{
+		NetInterface: "",
+		IP:           nil,
+		Duration:     time.Minute * 5,
+		Time:         2000,
+		Jitter:       0,
+		Correlation:  0,
+		Distribution: "",
+		StopChan:     gStopChan,
+		Image:        DefaultImage,
 	}
+
+	a := [1]string{"centos"}
+	b := a[:]
+
+	runChaosCommand(delayCmd, b, "", action.NewChaos().NetemDelayContainers)*/
+	mux := http.NewServeMux()
+	mux.HandleFunc("/netem", netem)
+	handler := cors.Default().Handler(mux)
+	http.ListenAndServe(":8080", handler)
+	/*if err := app.Run(os.Args); err != nil {
+		log.Fatal(err)
+	}*/
 }
 
 func before(c *cli.Context) error {
@@ -461,6 +494,10 @@ func before(c *cli.Context) error {
 	}
 	// create new Docker client
 	client = container.NewClient(c.GlobalString("host"), tls)
+
+	// get Docker image with tc (iproute2 package)
+	client.PullImage(DefaultImage)
+
 	// create new Chaos instance
 	chaos = action.NewChaos()
 	// habdle termination signal
@@ -549,7 +586,8 @@ func kill(c *cli.Context) error {
 	return nil
 }
 
-func parseNetemOptions(c *cli.Context) ([]string, string, time.Duration, string, net.IP, string, error) {
+func parseNetemOptions(
+	c *cli.Context) ([]string, string, time.Duration, string, net.IP, string, error) {
 	// get names or pattern
 	names, pattern := getNamesOrPattern(c)
 	// get duration
@@ -588,12 +626,8 @@ func parseNetemOptions(c *cli.Context) ([]string, string, time.Duration, string,
 		// get target IP Filter
 		ip = net.ParseIP(c.Parent().String("target"))
 	}
-	// get Docker image with tc (iproute2 package)
-	var image string
-	if c.Parent() != nil {
-		image = c.Parent().String("tc-image")
-	}
-	return names, pattern, duration, netInterface, ip, image, nil
+
+	return names, pattern, duration, netInterface, ip, DefaultImage, nil
 }
 
 // NETEM DELAY command
@@ -968,4 +1002,65 @@ func parseRate(rate string) (string, error) {
 		return "", err
 	}
 	return rate, nil
+}
+
+type NetemParams struct {
+	ContainerName string  `json:"containerName,omitEmpty"`
+	Delay         int     `json:"delay,omitEmpty"`
+	Loss          float64 `json:"loss,omitEmpty"`
+	Rate          float64 `json:"rate,omitEmpty"`
+	Time          string  `json:"time,omitEmpty"`
+}
+
+func netem(w http.ResponseWriter, r *http.Request) {
+	buf := new(bytes.Buffer)
+	buf.ReadFrom(r.Body)
+	n := new(NetemParams)
+	json.Unmarshal(buf.Bytes(), n)
+	log.Infof("Received request: %+v", n)
+	dur, _ := time.ParseDuration(n.Time)
+
+	handleSignals()
+	delayCmd := action.CommandNetemDelay{
+		NetInterface: "eth0",
+		IP:           nil,
+		Duration:     dur,
+		Time:         n.Delay,
+		Jitter:       0,
+		Correlation:  0,
+		Distribution: "",
+		StopChan:     gStopChan,
+		Image:        DefaultImage,
+	}
+
+	a := [1]string{n.ContainerName}
+	b := a[:]
+
+	go runChaosCommand(delayCmd, b, "", action.NewChaos().NetemDelayContainers)
+
+	//handleSignals()
+	// lossCmd := action.CommandNetemLossRandom{
+	// 	NetInterface: "eth0",
+	// 	IP:           nil,
+	// 	Duration:     dur,
+	// 	Percent:      n.Loss,
+	// 	Correlation:  0,
+	// 	StopChan:     gStopChan,
+	// 	Image:        DefaultImage,
+	// }
+
+	//go runChaosCommand(lossCmd, b, "", action.NewChaos().NetemLossRandomContainers)
+}
+
+// ReadEntityFromRequest writes a REST request body to the given requestObject.
+// The function returns true if the decode was successful, false otherwise.
+func ReadEntityFromRequest(request *restful.Request, response *restful.Response,
+	requestObject interface{}) bool {
+
+	err := request.ReadEntity(&requestObject)
+	if err != nil {
+		response.WriteErrorString(http.StatusInternalServerError, err.Error())
+		return false
+	}
+	return true
 }

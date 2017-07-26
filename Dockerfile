@@ -68,6 +68,8 @@ COPY --from=builder /go/src/github.com/gaia-adm/pumba/dist/bin/pumba /usr/bin/pu
 COPY docker_entrypoint.sh /
 RUN chmod +x /docker_entrypoint.sh
 
+EXPOSE 8080
+
 ENTRYPOINT ["/docker_entrypoint.sh"]
 CMD ["pumba", "--help"]
 

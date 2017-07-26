@@ -14,7 +14,6 @@ import (
 	types "github.com/docker/docker/api/types"
 	ctypes "github.com/docker/docker/api/types/container"
 	dockerapi "github.com/docker/docker/client"
-	"github.com/docker/go-connections/nat"
 )
 
 const (
@@ -37,6 +36,7 @@ type Client interface {
 	StopNetemContainer(Container, string, string, bool) error
 	PauseContainer(Container, bool) error
 	UnpauseContainer(Container, bool) error
+	PullImage(string) error
 }
 
 // NewClient returns a new Client instance which can be used to interact with
@@ -217,6 +217,15 @@ func (client dockerClient) UnpauseContainer(c Container, dryrun bool) error {
 	return nil
 }
 
+func (client dockerClient) PullImage(image string) error {
+	if _, err := client.imageAPI.ImagePull(context.Background(), image, types.ImagePullOptions{}); err != nil {
+		log.Error(err)
+		return err
+	}
+
+	return nil
+}
+
 func (client dockerClient) startNetemContainer(c Container, netInterface string, netemCmd []string, tcimage string, dryrun bool) error {
 	prefix := ""
 	if dryrun {
@@ -325,7 +334,7 @@ func (client dockerClient) tcContainerCommand(target Container, args []string, t
 		// use target container network stack
 		NetworkMode: ctypes.NetworkMode("container:" + target.ID()),
 		// others
-		PortBindings: nat.PortMap{},
+		PortBindings: nil,
 		DNS:          []string{},
 		DNSOptions:   []string{},
 		DNSSearch:    []string{},
