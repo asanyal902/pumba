@@ -278,7 +278,7 @@ func (client dockerClient) startNetemContainerIPFilter(c Container, netInterface
 		//  Create a priority-based queue.
 		// 'tc qdisc add dev <netInterface> root handle 1: prio'
 		// See more: http://stuff.onse.fi/man?program=tc
-		handleCommand := []string{"qdisc", "add", "dev", netInterface, "root", "handle", "1:", "prio"}
+		handleCommand := []string{"qdisc", "change", "dev", netInterface, "root", "handle", "1:", "prio"}
 		log.Debugf("handleCommand %s", handleCommand)
 		err := client.tcCommand(c, handleCommand, tcimage)
 		if err != nil {
@@ -288,7 +288,7 @@ func (client dockerClient) startNetemContainerIPFilter(c Container, netInterface
 		//  Delay everything in band 3
 		// 'tc qdisc add dev <netInterface> parent 1:3 netem <netemCmd>'
 		// See more: http://stuff.onse.fi/man?program=tc
-		netemCommand := append([]string{"qdisc", "add", "dev", netInterface, "parent", "1:3", "netem"}, netemCmd...)
+		netemCommand := append([]string{"qdisc", "change", "dev", netInterface, "parent", "1:3", "netem"}, netemCmd...)
 		log.Debugf("netemCommand %s", netemCommand)
 		err = client.tcCommand(c, netemCommand, tcimage)
 		if err != nil {

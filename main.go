@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -1008,7 +1009,7 @@ type NetemParams struct {
 	ContainerName string  `json:"containerName,omitEmpty"`
 	Delay         int     `json:"delay,omitEmpty"`
 	Loss          float64 `json:"loss,omitEmpty"`
-	Rate          float64 `json:"rate,omitEmpty"`
+	Rate          int     `json:"rate,omitEmpty"`
 	Time          string  `json:"time,omitEmpty"`
 }
 
@@ -1021,35 +1022,50 @@ func netem(w http.ResponseWriter, r *http.Request) {
 	dur, _ := time.ParseDuration(n.Time)
 
 	handleSignals()
-	delayCmd := action.CommandNetemDelay{
-		NetInterface: "eth0",
-		IP:           nil,
-		Duration:     dur,
-		Time:         n.Delay,
-		Jitter:       0,
-		Correlation:  0,
-		Distribution: "",
-		StopChan:     gStopChan,
-		Image:        DefaultImage,
-	}
-
 	a := [1]string{n.ContainerName}
 	b := a[:]
 
-	go runChaosCommand(delayCmd, b, "", action.NewChaos().NetemDelayContainers)
+	if n.Delay > 0 {
+		delayCmd := action.CommandNetemDelay{
+			NetInterface: "eth0",
+			IP:           nil,
+			Duration:     dur,
+			Time:         n.Delay,
+			Jitter:       0,
+			Correlation:  0,
+			Distribution: "",
+			StopChan:     gStopChan,
+			Image:        DefaultImage,
+		}
 
-	//handleSignals()
-	// lossCmd := action.CommandNetemLossRandom{
-	// 	NetInterface: "eth0",
-	// 	IP:           nil,
-	// 	Duration:     dur,
-	// 	Percent:      n.Loss,
-	// 	Correlation:  0,
-	// 	StopChan:     gStopChan,
-	// 	Image:        DefaultImage,
-	// }
+		go runChaosCommand(delayCmd, b, "", action.NewChaos().NetemDelayContainers)
+	} else if n.Loss > 0 {
+		lossCmd := action.CommandNetemLossRandom{
+			NetInterface: "eth0",
+			IP:           nil,
+			Duration:     dur,
+			Percent:      n.Loss,
+			Correlation:  0,
+			StopChan:     gStopChan,
+			Image:        DefaultImage,
+		}
 
-	//go runChaosCommand(lossCmd, b, "", action.NewChaos().NetemLossRandomContainers)
+		go runChaosCommand(lossCmd, b, "", action.NewChaos().NetemLossRandomContainers)
+	} else {
+		rateCmd := action.CommandNetemRate{
+			NetInterface:   "eth0",
+			IP:             nil,
+			Duration:       dur,
+			Rate:           strconv.Itoa(n.Rate),
+			PacketOverhead: 0,
+			CellSize:       100,
+			CellOverhead:   0,
+			StopChan:       gStopChan,
+			Image:          DefaultImage,
+		}
+		go runChaosCommand(rateCmd, b, "", action.NewChaos().NetemRateContainers)
+	}
+
 }
 
 // ReadEntityFromRequest writes a REST request body to the given requestObject.
